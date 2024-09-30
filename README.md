@@ -21,13 +21,13 @@ Avant de commencer, assurez-vous d'avoir installé les éléments suivants :
 1. Clonez le dépôt dans votre répertoire local :
 
    ```bash
-   git clone https://github.com/votre-utilisateur/box-office-roi-predictor.git
+   git clone https://github.com/votre-utilisateur/box-office.git
    ```
 
 2. Accédez au répertoire du projet :
 
    ```bash
-   cd box-office-roi-predictor
+   cd box-office
    ```
 
 3. Créez un environnement virtuel :
