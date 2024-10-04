@@ -3,8 +3,9 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
+from api_key import API_KEY
+
 # Remplace par ta clé API TMDb
-API_KEY = '2062561ae58c6832246075755f884642'
 BASE_URL = 'https://api.themoviedb.org/3/'
 
 # Fonction pour obtenir les films par genre
