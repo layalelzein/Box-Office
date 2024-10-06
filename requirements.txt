@@ -2,5 +2,3 @@ requests
 pandas
 streamlit
 matplotlib
-os
-Time
