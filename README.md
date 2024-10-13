@@ -84,8 +84,7 @@ Les principales bibliothèques utilisées dans ce projet sont :
 - `pandas` : Pour manipuler et analyser les données.
 - `matplotlib` : Pour la visualisation des données.
 - `streamlit` : Pour créer le tableau de bord interactif.
-- `os`: Pour accéder aux variables d'environnement, comme la clé API, et gérer les fonctionnalités liées au système d'exploitation.
-- `time` : Pour introduire des pauses ou mesurer le temps d'exécution des opérations (bien que cela ne soit pas explicitement utilisé dans le code final).
+
 
 ## Auteurs
 

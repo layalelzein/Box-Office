@@ -3,18 +3,17 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 import time
-import os
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import LabelEncoder
+import seaborn as sns
 
-# Load API key from environment variable
-API_KEY = os.getenv('TMDB_API_KEY')
-
-# Base URL for TMDb API
+API_KEY = '2062561ae58c6832246075755f884642'
 BASE_URL = 'https://api.themoviedb.org/3/'
 
-# Function to get movies by genre, with retry logic for robustness
+# Fonction pour obtenir les films par genre, avec la gestion des tentatives
 def get_movies_by_genre(genre_id, total_pages=5):
     all_movies = []
     for page in range(1, total_pages + 1):
@@ -26,41 +25,81 @@ def get_movies_by_genre(genre_id, total_pages=5):
                 all_movies.extend(response.json()['results'])
                 break
             else:
-                print(f"Error {response.status_code} on page {page}, attempt {attempt+1}/{retries}")
-                time.sleep(2)  # Wait before retrying
+                print(f"Erreur {response.status_code} à la page {page}, tentative {attempt+1}/{retries}")
+                time.sleep(2)
     return pd.DataFrame(all_movies)
 
-# Function to get movie details by ID with retry logic
+# Fonction pour obtenir les détails d'un film par son ID
 def get_movie_details(movie_id):
-    url = f"{BASE_URL}movie/{movie_id}?api_key={API_KEY}"
+    url = f"{BASE_URL}movie/{movie_id}?api_key={API_KEY}&append_to_response=credits"
     retries = 3
     for attempt in range(retries):
         response = requests.get(url)
         if response.status_code == 200:
             return response.json()
         else:
-            print(f"Error {response.status_code} for movie ID {movie_id}, attempt {attempt+1}/{retries}")
-            time.sleep(2)  # Wait before retrying
+            print(f"Erreur {response.status_code} pour l'ID du film {movie_id}, tentative {attempt+1}/{retries}")
+            time.sleep(2)
     return None
 
-# Enrich movies with budget and revenue details
+# Enrichir les films avec le budget, les revenus, le réalisateur, les acteurs, la durée, et la date de sortie
 def enrich_movies_with_details(movies_df):
     budgets = []
     revenues = []
+    directors = []
+    actors = []
+    release_dates = []
+    
     for movie_id in movies_df['id']:
         details = get_movie_details(movie_id)
         if details:
             budgets.append(details.get('budget', 0))
             revenues.append(details.get('revenue', 0))
+            release_dates.append(details.get('release_date', 'Unknown'))  # Date de sortie
+            
+            # Récupérer le réalisateur
+            director = next((crew['name'] for crew in details['credits']['crew'] if crew['job'] == 'Director'), 'Unknown')
+            directors.append(director)
+            
+            # Récupérer les 3 principaux acteurs
+            top_actors = [actor['name'] for actor in details['credits']['cast'][:3]] if 'credits' in details and 'cast' in details['credits'] else []
+            actors.append(', '.join(top_actors))
         else:
             budgets.append(0)
             revenues.append(0)
+            release_dates.append('Unknown')
+            directors.append('Unknown')
+            actors.append('')
     
     movies_df['budget'] = budgets
     movies_df['revenue'] = revenues
+    movies_df['director'] = directors
+    movies_df['actors'] = actors
+    movies_df['release_date'] = release_dates
     return movies_df
 
-# Genres mapping
+# Convertir la date de sortie en saison
+def get_season(release_date):
+    if isinstance(release_date, str) and len(release_date.split('-')) == 3:
+        try:
+            month = int(release_date.split('-')[1])
+        except (ValueError, IndexError):
+            return 'Unknown'
+    else:
+        return 'Unknown'
+    
+    if month in [12, 1, 2]:
+        return 'Winter'
+    elif month in [3, 4, 5]:
+        return 'Spring'
+    elif month in [6, 7, 8]:
+        return 'Summer'
+    elif month in [9, 10, 11]:
+        return 'Fall'
+    else:
+        return 'Unknown'
+
+# Collecte des données pour chaque genre
 genres = {
     'Action': 28,
     'Comedy': 35,
@@ -71,99 +110,101 @@ genres = {
     'Romance': 10749,
     'Thriller': 53,
     'Animation': 16,
-    'Documentary': 99,
-    'Family': 10751,
-    'Musical': 10402,
-    'Mystery': 9648
+    'Documentary': 99
 }
 
-# Collect data for each genre
 all_movies = pd.DataFrame()
 
 for genre_name, genre_id in genres.items():
-    df = get_movies_by_genre(genre_id, total_pages=3)  # Limited to 3 pages for each genre
+    df = get_movies_by_genre(genre_id, total_pages=3)
     df['genre'] = genre_name
     all_movies = pd.concat([all_movies, df])
 
-# Enrich movies with budget and revenue details
+# Enrichir les films avec des détails supplémentaires
 all_movies = enrich_movies_with_details(all_movies)
 
-# Data cleaning: Remove rows where budget or revenue is 0 or missing
+# Ajouter la saison de sortie
+all_movies['season'] = all_movies['release_date'].apply(get_season)
+
+# Nettoyage des données
 all_movies = all_movies.dropna(subset=['budget', 'revenue'])
 all_movies = all_movies[(all_movies['budget'] > 0) & (all_movies['revenue'] > 0)]
 
-# Calculate ROI for each movie
+# Calcul du ROI pour chaque film
 all_movies['roi'] = (all_movies['revenue'] - all_movies['budget']) / all_movies['budget']
 
-# Calculate average ROI per genre
-genre_roi = all_movies.groupby('genre')['roi'].mean().sort_values(ascending=False)
+# Sélection de variables : Encodage des variables catégorielles
+label_enc_director = LabelEncoder()
+all_movies['director_encoded'] = label_enc_director.fit_transform(all_movies['director'])
 
-# Streamlit Dashboard
-st.title("Most Profitable Movie Genres - Dashboard")
+label_enc_season = LabelEncoder()
+all_movies['season_encoded'] = label_enc_season.fit_transform(all_movies['season'])
 
-# Display raw data
-st.subheader("Raw Data")
-st.write(all_movies[['title', 'genre', 'budget', 'revenue', 'roi']].head(10))
+# Variables pour la prédiction (budget, directeur, saison)
+X = all_movies[['budget', 'director_encoded', 'season_encoded']]
 
-# Display average ROI by genre
-st.subheader("Average ROI by Genre")
-st.dataframe(genre_roi)
+# Target (ROI)
+y = all_movies['roi']
 
-# Bar chart of most profitable genres
-st.subheader("Most Profitable Genres Chart")
-plt.figure(figsize=(10, 6))
-plt.barh(genre_roi.index, genre_roi.values, color='skyblue')
-plt.xlabel('Average ROI')
-plt.ylabel('Genres')
-plt.title('Most Profitable Genres')
-st.pyplot(plt)
-
-# Filters to explore data by budget and genre
-st.subheader("Explore Data by Budget and Genre")
-min_budget = st.slider("Minimum Budget", min_value=int(all_movies['budget'].min()), max_value=int(all_movies['budget'].max()), value=int(all_movies['budget'].min()))
-max_budget = st.slider("Maximum Budget", min_value=min_budget, max_value=int(all_movies['budget'].max()), value=int(all_movies['budget'].max()))
-
-# Filter movies by budget
-filtered_movies = all_movies[(all_movies['budget'] >= min_budget) & (all_movies['budget'] <= max_budget)]
-
-# Add genre filtering option
-selected_genres = st.multiselect("Select Genres", options=list(genres.keys()), default=list(genres.keys()))
-filtered_movies = filtered_movies[filtered_movies['genre'].isin(selected_genres)]
-
-# Display filtered movies
-st.write(filtered_movies[['title', 'genre', 'budget', 'revenue', 'roi']].head(10))
-
-# Recalculate average ROI for filtered movies
-filtered_genre_roi = filtered_movies.groupby('genre')['roi'].mean().sort_values(ascending=False)
-st.subheader("Average ROI for Filtered Genres")
-st.dataframe(filtered_genre_roi)
-
-# Download filtered data as CSV
-csv = filtered_movies.to_csv(index=False)
-st.download_button(label="Download Filtered Data as CSV", data=csv, mime="text/csv")
-
-# Train a Linear Regression model to predict ROI based on budget
-st.subheader("Predict ROI Based on Budget")
-X = all_movies[['budget']]  # Features
-y = all_movies['roi']  # Target
-
-# Split the data into training and testing sets
+# Split des données
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Train the model
+# Modèle de régression linéaire
 model = LinearRegression()
 model.fit(X_train, y_train)
 
-# Predict on the test set
+# Prédiction
 y_pred = model.predict(X_test)
 
-# Display model performance metrics
-st.write(f"Mean Squared Error: {mean_squared_error(y_test, y_pred):.2f}")
-st.write(f"R² Score: {r2_score(y_test, y_pred):.2f}")
+# Streamlit Dashboard
+st.title("Dashboard de rentabilité des films")
 
-# Predict ROI based on user input budget
-user_budget = st.number_input("Enter a movie budget to predict ROI", min_value=int(all_movies['budget'].min()), max_value=int(all_movies['budget'].max()), value=10000000)
-predicted_roi = model.predict([[user_budget]])[0]
+# Section 1: Données brutes
+st.subheader("Données brutes")
+st.write(all_movies[['title', 'genre', 'budget', 'revenue', 'roi', 'director', 'actors', 'release_date', 'season']].head(10))
 
-st.write(f"Predicted ROI for a movie with a budget of ${user_budget:,}: {predicted_roi:.2f}")
-all_movies.to_csv('movies_data.csv', index=False)
+# Section 2: ROI par genre
+st.subheader("ROI moyen par genre")
+genre_roi = all_movies.groupby('genre')['roi'].mean().sort_values(ascending=False)
+st.dataframe(genre_roi)
+
+# Section 3: Visualisation des tendances de rentabilité par genre
+st.subheader("Tendances de rentabilité par genre")
+roi_per_year = all_movies.groupby([all_movies['release_date'].str[:4], 'genre'])['roi'].mean().unstack()
+st.line_chart(roi_per_year)
+
+# Section 4: Matrice de corrélation
+st.subheader("Corrélation entre les facteurs")
+corr_matrix = all_movies[['budget', 'roi', 'director_encoded', 'season_encoded']].corr()
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', ax=plt.gca())
+st.pyplot(plt)
+
+# Section 5: Exploration par budget et genre
+st.subheader("Explorez les films par budget et genre")
+min_budget = st.slider("Budget minimum", min_value=int(all_movies['budget'].min()), max_value=int(all_movies['budget'].max()), value=int(all_movies['budget'].min()))
+max_budget = st.slider("Budget maximum", min_value=min_budget, max_value=int(all_movies['budget'].max()), value=int(all_movies['budget'].max()))
+
+filtered_movies = all_movies[(all_movies['budget'] >= min_budget) & (all_movies['budget'] <= max_budget)]
+selected_genres = st.multiselect("Sélectionnez des genres", options=list(genres.keys()), default=list(genres.keys()))
+filtered_movies = filtered_movies[filtered_movies['genre'].isin(selected_genres)]
+st.write(filtered_movies[['title', 'genre', 'budget', 'revenue', 'roi']].head(10))
+
+# Section 6: Prédiction basée sur les entrées utilisateur
+st.subheader("Prédiction du ROI")
+user_budget = st.number_input("Entrez le budget du film", min_value=int(all_movies['budget'].min()), max_value=int(all_movies['budget'].max()), value=100000000)
+user_director = st.selectbox("Sélectionnez un réalisateur", options=label_enc_director.classes_)
+user_season = st.selectbox("Sélectionnez une saison", options=label_enc_season.classes_)
+
+# Encodage des entrées utilisateur
+user_director_encoded = label_enc_director.transform([user_director])[0]
+user_season_encoded = label_enc_season.transform([user_season])[0]
+
+predicted_roi = model.predict([[user_budget, user_director_encoded, user_season_encoded]])[0]
+st.write(f"Prédiction du ROI pour un film avec un budget de {user_budget:,} et réalisé par {user_director}: {predicted_roi:.2f}")
+
+# Section 7: Importance des variables avec RandomForest
+st.subheader("Importance des variables")
+rf = RandomForestRegressor()
+rf.fit(X, y)
+feature_importances = pd.Series(rf.feature_importances_, index=X.columns)
+st.bar_chart(feature_importances.sort_values(ascending=False))
