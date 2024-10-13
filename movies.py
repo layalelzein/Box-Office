@@ -133,6 +133,12 @@ all_movies = all_movies[(all_movies['budget'] > 0) & (all_movies['revenue'] > 0)
 # Calcul du ROI pour chaque film
 all_movies['roi'] = (all_movies['revenue'] - all_movies['budget']) / all_movies['budget']
 
+# Nettoyage des données : exclure les films avec des budgets ou des revenus égaux à 0 ou trop faibles
+all_movies = all_movies[(all_movies['budget'] > 1000) & (all_movies['revenue'] > 1000)]
+
+# Limiter les ROI à une valeur raisonnable (ex : ROI <= 10000)
+all_movies = all_movies[all_movies['roi'] <= 10000]
+
 # Sélection de variables : Encodage des variables catégorielles
 label_enc_director = LabelEncoder()
 all_movies['director_encoded'] = label_enc_director.fit_transform(all_movies['director'])
@@ -145,6 +151,7 @@ X = all_movies[['budget', 'director_encoded', 'season_encoded']]
 
 # Target (ROI)
 y = all_movies['roi']
+
 
 # Split des données
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -168,43 +175,90 @@ st.subheader("ROI moyen par genre")
 genre_roi = all_movies.groupby('genre')['roi'].mean().sort_values(ascending=False)
 st.dataframe(genre_roi)
 
-# Section 3: Visualisation des tendances de rentabilité par genre
-st.subheader("Tendances de rentabilité par genre")
-roi_per_year = all_movies.groupby([all_movies['release_date'].str[:4], 'genre'])['roi'].mean().unstack()
-st.line_chart(roi_per_year)
-
-# Section 4: Matrice de corrélation
-st.subheader("Corrélation entre les facteurs")
-corr_matrix = all_movies[['budget', 'roi', 'director_encoded', 'season_encoded']].corr()
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', ax=plt.gca())
+# Section 3: Bar chart des genres les plus rentables
+st.subheader("Graphique des genres les plus rentables")
+plt.figure(figsize=(10, 6))
+plt.barh(genre_roi.index, genre_roi.values, color='skyblue')
+plt.xlabel('ROI moyen')
+plt.ylabel('Genres')
+plt.title('Genres les plus rentables')
+plt.gca().invert_yaxis()  # Inverser l'axe des y pour avoir le genre le plus rentable en haut
 st.pyplot(plt)
 
-# Section 5: Exploration par budget et genre
-st.subheader("Explorez les films par budget et genre")
-min_budget = st.slider("Budget minimum", min_value=int(all_movies['budget'].min()), max_value=int(all_movies['budget'].max()), value=int(all_movies['budget'].min()))
-max_budget = st.slider("Budget maximum", min_value=min_budget, max_value=int(all_movies['budget'].max()), value=int(all_movies['budget'].max()))
+# Section 4: Tendances de rentabilité par genre
+st.subheader("Tendances de rentabilité par genre")
+# Extraire l'année de la date de sortie
+all_movies['release_year'] = all_movies['release_date'].apply(lambda x: x.split('-')[0] if isinstance(x, str) and len(x.split('-')) == 3 else 'Unknown')
+roi_per_year = all_movies[all_movies['release_year'] != 'Unknown'].groupby(['release_year', 'genre'])['roi'].mean().unstack()
+st.line_chart(roi_per_year)
 
-filtered_movies = all_movies[(all_movies['budget'] >= min_budget) & (all_movies['budget'] <= max_budget)]
-selected_genres = st.multiselect("Sélectionnez des genres", options=list(genres.keys()), default=list(genres.keys()))
-filtered_movies = filtered_movies[filtered_movies['genre'].isin(selected_genres)]
+# Section 5: Matrice de corrélation
+st.subheader("Corrélation entre les facteurs")
+corr_matrix = all_movies[['budget', 'roi', 'director_encoded', 'season_encoded']].corr()
+plt.figure(figsize=(8, 6))
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm')
+st.pyplot(plt)
+
+# Section 6: Exploration par budget et genre
+st.subheader("Explorez les films par budget et genre")
+min_budget = int(all_movies['budget'].min())
+max_budget = int(all_movies['budget'].max())
+default_budget = min(500000000, max_budget)  # Ajuster la valeur par défaut
+
+user_budget = st.number_input(
+    "Entrez le budget du film",
+    min_value=min_budget,
+    max_value=max_budget,
+    value=min_budget
+)
+
+selected_genres = st.multiselect(
+    "Sélectionnez des genres",
+    options=list(genres.keys()),
+    default=list(genres.keys())
+)
+
+filtered_movies = all_movies[
+    (all_movies['budget'] >= user_budget) &
+    (all_movies['budget'] <= max_budget) &
+    (all_movies['genre'].isin(selected_genres))
+]
+
 st.write(filtered_movies[['title', 'genre', 'budget', 'revenue', 'roi']].head(10))
 
-# Section 6: Prédiction basée sur les entrées utilisateur
-st.subheader("Prédiction du ROI")
-user_budget = st.number_input("Entrez le budget du film", min_value=int(all_movies['budget'].min()), max_value=int(all_movies['budget'].max()), value=100000000)
+# Recalculer le ROI moyen pour les genres filtrés
+filtered_genre_roi = filtered_movies.groupby('genre')['roi'].mean().sort_values(ascending=False)
+st.subheader("ROI moyen pour les genres filtrés")
+st.dataframe(filtered_genre_roi)
+
+# Section 7: Téléchargement des données filtrées
+csv = filtered_movies.to_csv(index=False)
+st.download_button(label="Télécharger les données filtrées en CSV", data=csv, mime="text/csv")
+
+# Section 8: Prédiction du ROI basé sur plusieurs caractéristiques
+st.subheader("Prédire le ROI en fonction de plusieurs caractéristiques")
+
 user_director = st.selectbox("Sélectionnez un réalisateur", options=label_enc_director.classes_)
 user_season = st.selectbox("Sélectionnez une saison", options=label_enc_season.classes_)
 
 # Encodage des entrées utilisateur
-user_director_encoded = label_enc_director.transform([user_director])[0]
-user_season_encoded = label_enc_season.transform([user_season])[0]
+try:
+    user_director_encoded = label_enc_director.transform([user_director])[0]
+except ValueError:
+    user_director_encoded = 0  # Valeur par défaut si le réalisateur n'est pas trouvé
 
+try:
+    user_season_encoded = label_enc_season.transform([user_season])[0]
+except ValueError:
+    user_season_encoded = 0  # Valeur par défaut si la saison n'est pas trouvée
+
+# Prédiction
 predicted_roi = model.predict([[user_budget, user_director_encoded, user_season_encoded]])[0]
-st.write(f"Prédiction du ROI pour un film avec un budget de {user_budget:,} et réalisé par {user_director}: {predicted_roi:.2f}")
+st.write(f"Prédiction du ROI pour un film avec un budget de ${user_budget:,} et réalisé par {user_director}: {predicted_roi:.2f}")
 
-# Section 7: Importance des variables avec RandomForest
+# Section 9: Importance des variables avec RandomForest
 st.subheader("Importance des variables")
-rf = RandomForestRegressor()
+rf = RandomForestRegressor(random_state=42)
 rf.fit(X, y)
 feature_importances = pd.Series(rf.feature_importances_, index=X.columns)
 st.bar_chart(feature_importances.sort_values(ascending=False))
