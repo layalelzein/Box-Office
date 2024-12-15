@@ -49,16 +49,17 @@ def enrich_movies_with_details(movies_df):
             director = next((crew['name'] for crew in details['credits']['crew'] if crew['job'] == 'Director'), 'Unknown')
             directors.append(director)
 
-            # Récupérer les 3 principaux acteurs
-            top_actors = [actor['name'] for actor in details['credits']['cast'][:3]] if 'credits' in details else []
-            actors.append(', '.join(top_actors))
+            # Récupérer le principal acteur
+            if 'credits' in details and 'cast' in details['credits'] and details['credits']['cast']:
+                main_actor = details['credits']['cast'][0]['name']  # Prendre le premier acteur uniquement
+            else:
+                main_actor = 'Unknown'
+            actors.append(main_actor)
+
 
             # Récupérer le studio principal avec gestion des cas vides
             production_companies = details.get('production_companies', [])
-            if production_companies:
-                studio = production_companies[0]['name']
-            else:
-                studio = 'Unknown'
+            studio = production_companies[0]['name'] if production_companies else 'Unknown'
             studios.append(studio)
         else:
             budgets.append(0), revenues.append(0), directors.append('Unknown')
@@ -101,8 +102,20 @@ label_enc_season = LabelEncoder()
 all_movies['season_encoded'] = label_enc_season.fit_transform(all_movies['season'])
 joblib.dump(label_enc_season, 'data/season_encoder.pkl')
 
+label_enc_actors = LabelEncoder()
+all_movies['actors_encoded'] = label_enc_actors.fit_transform(all_movies['actors'])
+joblib.dump(label_enc_actors, 'data/actors_encoder.pkl')
+
+label_enc_studio = LabelEncoder()
+all_movies['studio_encoded'] = label_enc_studio.fit_transform(all_movies['studio'])
+joblib.dump(label_enc_studio, 'data/studio_encoder.pkl')
+
+label_enc_genre = LabelEncoder()
+all_movies['genre_encoded'] = label_enc_genre.fit_transform(all_movies['genre'])
+joblib.dump(label_enc_genre, 'data/genre_encoder.pkl')
+
 # Entraînement du modèle
-X = all_movies[['budget', 'director_encoded', 'season_encoded']]
+X = all_movies[['budget', 'director_encoded', 'season_encoded', 'actors_encoded', 'studio_encoded', 'genre_encoded']]
 y = all_movies['roi']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
