@@ -57,19 +57,48 @@ if selected_genres:
 else:
     st.warning("Veuillez sélectionner au moins un genre.")
 
-# Filtre dynamique : ROI par genre pour une année spécifique
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
 st.subheader("Filtre dynamique : ROI par genre")
-available_years = sorted(filtered_movies['release_year'].unique())
-selected_year = st.selectbox("Sélectionnez une année", options=available_years)
 
-# Filtrer les données pour l'année sélectionnée
-filtered_data = filtered_movies[filtered_movies['release_year'] == selected_year]
+# Récupérer les années disponibles
+all_movies['release_year'] = all_movies['release_year'].astype(int)
+historical_years = sorted(all_movies['release_year'].unique())
 
-# Calculer le ROI moyen pour chaque genre
-roi_by_genre = filtered_data.groupby('genre')['roi'].mean().sort_values(ascending=False)
+# Étendre les années jusqu'à 2035
+future_years = list(range(2025, 2036))
+all_years = historical_years + future_years
 
-# Afficher le graphique
-st.bar_chart(roi_by_genre)
+# Initialiser un DataFrame pour les prédictions
+genre_predictions = pd.DataFrame({'release_year': all_years})
 
-# Afficher les données
-st.dataframe(roi_by_genre.reset_index().rename(columns={"roi": "ROI moyen"}))
+# Prédire le ROI futur par genre
+for genre in all_movies['genre'].unique():
+    # Extraire les données historiques pour le genre en question
+    genre_data = all_movies[all_movies['genre'] == genre].groupby('release_year')['roi'].mean().reset_index()
+
+    # Vérifier s'il y a suffisamment de données pour entraîner un modèle
+    if len(genre_data) > 1:
+        # Modèle de régression linéaire
+        model = LinearRegression()
+        X = genre_data['release_year'].values.reshape(-1, 1)
+        y = genre_data['roi'].values
+        model.fit(X, y)
+
+        # Prédire les ROI pour toutes les années (historiques + futures)
+        predicted_roi = model.predict(np.array(all_years).reshape(-1, 1))
+        genre_predictions[genre] = predicted_roi
+    else:
+        # Si pas assez de données, remplir avec NaN
+        genre_predictions[genre] = np.nan
+
+# Interface utilisateur
+selected_year = st.selectbox("Sélectionnez une année", options=all_years)
+
+# Afficher les ROI pour l'année sélectionnée
+if selected_year in genre_predictions['release_year'].values:
+    roi_for_year = genre_predictions[genre_predictions['release_year'] == selected_year].set_index('release_year').T
+    st.bar_chart(roi_for_year)
+else:
+    st.write("Aucune donnée disponible pour l'année sélectionnée.")
