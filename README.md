@@ -1,6 +1,7 @@
 # Box Office ROI Predictor
 
 Ce projet est un système prédictif de rentabilité des films par genre. Il collecte des données sur les films via l'API de TMDb, calcule le retour sur investissement (ROI) pour chaque film, et visualise les genres les plus rentables dans un tableau de bord interactif créé avec **Streamlit**.
+https://box-office.streamlit.app/Comparaison_studios
 
 ## Fonctionnalités
 
